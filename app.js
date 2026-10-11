@@ -313,7 +313,8 @@ function saveEntity(type,obj){const list=data[type];const existing=obj.id?list.f
  if(existing)Object.assign(existing,obj);else{obj.id=uid();list.unshift(obj)}save();$("#modal-root").innerHTML="";render();notify(existing?"Changes saved":"Created successfully")}
 function deleteEntity(type,id,label){const item=data[type].find(x=>x.id===id);if(!item)return;if(!confirm(`Delete ${label} "${item.title||item.name}"? This cannot be undone.`))return;data[type]=data[type].filter(x=>x.id!==id);if(type==="projects")data.tasks.forEach(t=>{if(t.projectId===id)t.projectId=""});if(type==="habits")delete data.habitLogs[id];save();render();notify(`${label} deleted`)}
 function exportData(){const payload={...data,exportedAt:new Date().toISOString(),app:"LifeOS local MVP"};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`lifeos-backup-${todayISO()}.json`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);notify("Workspace export prepared")}
-function importData(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result));if(!parsed||typeof parsed!=="object"||!Array.isArray(parsed.tasks)||!Array.isArray(parsed.projects)||!Array.isArray(parsed.notes)||!Array.isArray(parsed.goals)||!Array.isArray(parsed.habits))throw new Error("This does not look like a LifeOS export.");if(!confirm("Import this backup and replace the current workspace? Export your current data first if you need it."))return;const clean=initialData();for(const k of ["profile","tasks","projects","notes","goals","habits","habitLogs","preferences"])if(parsed[k]!==undefined)clean[k]=parsed[k];data=clean;save();// Supabase-backed authentication and workspace access.
+function importData(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result));if(!parsed||typeof parsed!=="object"||!Array.isArray(parsed.tasks)||!Array.isArray(parsed.projects)||!Array.isArray(parsed.notes)||!Array.isArray(parsed.goals)||!Array.isArray(parsed.habits))throw new Error("This does not look like a LifeOS export.");if(!confirm("Import this backup and replace the current workspace? Export your current data first if you need it."))return;const clean=initialData();for(const k of ["profile","tasks","projects","notes","goals","habits","habitLogs","preferences"])if(parsed[k]!==undefined)clean[k]=parsed[k];data=clean;save();applyTheme();render();notify("Workspace imported")}catch(e){alert(`Import failed: ${e.message||"Invalid backup file"}`)}};reader.readAsText(file)}
+// Supabase-backed authentication and workspace access.
 const authScreen=$("#auth-screen");
 const authForm=$("#auth-form");
 let authMode="signin", adminTapCount=0, adminTapTimer=null;
@@ -364,7 +365,7 @@ if(supabaseClient){
   handleAuthSession(data.session);
  }).catch(error=>{console.error(error);showAuth("Could not connect to Supabase. Check your internet connection.");});
 }else showAuth("Supabase configuration is missing. Check the URL and publishable key in index.html.");
-applyTheme();render();notify("Workspace imported")}catch(e){alert(`Import failed: ${e.message||"Invalid backup file"}`)}};reader.readAsText(file)}
+
 function handleAction(action,el){const id=el.dataset.id;
  switch(action){
  case"go-dashboard":setView("dashboard");break;case"view-tasks":setView("tasks");break;case"view-projects":setView("projects");break;case"view-notes":setView("notes");break;
