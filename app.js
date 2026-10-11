@@ -21,7 +21,68 @@ function loadData(){
   } catch { return initialData(); }
 }
 let data=loadData(), currentView="dashboard", toastTimer=null, searchQuery="", taskFilter="all", taskSort="created", calendarOffset=0;
-function save(){try{localStorage.setItem(APP_KEY,JSON.stringify(data));return true}catch{notify("Storage is full or unavailable. Export your data and remove large content.");return false}}
+let supabaseClient = null;
+let currentUser = null;
+let cloudSaveTimer = null;
+let cloudSaveInFlight = Promise.resolve();
+let cloudReady = false;
+try {
+  if (window.supabase?.createClient && window.LIFEOS_SUPABASE_URL && window.LIFEOS_SUPABASE_PUBLISHABLE_KEY) {
+    supabaseClient = window.supabase.createClient(window.LIFEOS_SUPABASE_URL, window.LIFEOS_SUPABASE_PUBLISHABLE_KEY);
+  }
+} catch (error) { console.error("Supabase initialization failed", error); }
+function scheduleCloudSave(){
+  if(!supabaseClient || !currentUser || !cloudReady) return;
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer=setTimeout(()=>{
+    const snapshot=JSON.parse(JSON.stringify(data));
+    cloudSaveInFlight=cloudSaveInFlight.then(async()=>{
+      if(!currentUser || !cloudReady) return;
+      const {error}=await supabaseClient.from("user_workspaces").upsert({user_id:currentUser.id,data:snapshot,updated_at:new Date().toISOString()},{onConflict:"user_id"});
+      if(error){console.error("Cloud save failed",error);notify("Saved on this device; cloud sync failed. Check your connection.");}
+    }).catch(error=>console.error("Cloud save queue error",error));
+  },650);
+}
+function save(){try{localStorage.setItem(APP_KEY,JSON.stringify(data));scheduleCloudSave();return true}catch{notify("Storage is full or unavailable. Export your data and remove large content.");return false}}
+function showAuth(message=""){
+  const screen=$("#auth-screen"); if(screen) screen.hidden=false;
+  const shell=$(".app-shell"); if(shell) shell.inert=true;
+  const nav=$(".mobile-nav"); if(nav) nav.inert=true;
+  if(message) $("#auth-error").textContent=message;
+}
+function showWorkspace(){
+  const screen=$("#auth-screen"); if(screen) screen.hidden=true;
+  const shell=$(".app-shell"); if(shell) shell.inert=false;
+  const nav=$(".mobile-nav"); if(nav) nav.inert=false;
+  const email=currentUser?.email||"";
+  const display=(email.split("@")[0]||"My workspace").replace(/[._-]+/g," ").replace(/\b\w/g,c=>c.toUpperCase());
+  if(!data.profile.name || data.profile.name==="My workspace") data.profile.name=display;
+  $(".profile-copy span") && ($(".profile-copy span").textContent=email||"Signed in");
+  render();
+}
+async function loadCloudWorkspace(user){
+  cloudReady=false;
+  const {data:row,error}=await supabaseClient.from("user_workspaces").select("data").eq("user_id",user.id).maybeSingle();
+  if(error) throw error;
+  if(row && row.data && typeof row.data==="object"){
+    const incoming=row.data; const clean=initialData();
+    for(const k of ["profile","tasks","projects","notes","goals","habits","habitLogs","preferences"]) if(incoming[k]!==undefined) clean[k]=incoming[k];
+    data=clean;
+    try{localStorage.setItem(APP_KEY,JSON.stringify(data))}catch{}
+  } else {
+    // First sign-in for this account: migrate this browser's existing workspace to the empty cloud record.
+    const snapshot=JSON.parse(JSON.stringify(data));
+    const {error:insertError}=await supabaseClient.from("user_workspaces").insert({user_id:user.id,data:snapshot});
+    if(insertError && insertError.code!=="23505") throw insertError;
+  }
+  currentUser=user; cloudReady=true; showWorkspace();
+}
+async function handleAuthSession(session){
+  currentUser=session?.user||null;
+  if(!currentUser){cloudReady=false;showAuth();return;}
+  try{await loadCloudWorkspace(currentUser);notify("Signed in · cloud workspace ready");}
+  catch(error){console.error("Workspace load failed",error);cloudReady=false;showAuth("Signed in, but your workspace could not load. Check that the user_workspaces table and RLS policies were created, then try again.");}
+}
 function notify(msg){const el=$("#toast");el.textContent=msg;el.classList.add("show");clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove("show"),2400)}
 function themeSet(){document.body.classList.remove("light");data.preferences.theme="colorful";try{localStorage.removeItem(THEME_KEY)}catch{}const meta=$('meta[name="theme-color"]');if(meta)meta.content="#f6f7ff"}
 function applyTheme(){themeSet()}
@@ -77,7 +138,7 @@ function calendarView(){const now=new Date(),first=new Date(now.getFullYear(),no
 }
 function searchView(){const q=searchQuery.trim().toLowerCase();const results=[];if(q){data.tasks.forEach(x=>{if((x.title+" "+x.description).toLowerCase().includes(q))results.push({type:"Task",title:x.title,desc:x.description||dueText(x.due),view:"tasks",id:x.id})});data.projects.forEach(x=>{if((x.name+" "+x.description).toLowerCase().includes(q))results.push({type:"Project",title:x.name,desc:x.description,view:"projects",id:x.id})});data.notes.forEach(x=>{if((x.title+" "+x.content+" "+(x.tags||[]).join(" ")).toLowerCase().includes(q))results.push({type:"Note",title:x.title,desc:x.content,view:"notes",id:x.id})});data.goals.forEach(x=>{if((x.title+" "+x.description).toLowerCase().includes(q))results.push({type:"Goal",title:x.title,desc:x.description,view:"goals",id:x.id})});data.habits.forEach(x=>{if(x.name.toLowerCase().includes(q))results.push({type:"Habit",title:x.name,desc:x.frequency,view:"goals",id:x.id})})}
  return pageHead("FIND YOUR CONTEXT","Universal search","Search across tasks, projects, notes, goals, and habits.")+`<div class="toolbar"><input class="field" id="universal-search" placeholder="Try a word, title, or idea…" value="${esc(searchQuery)}" autofocus></div><div class="search-results">${q?results.map(r=>`<button class="search-result" data-action="open-result" data-view="${r.view}" data-id="${esc(r.id)}"><span class="result-type">${r.type}</span><span class="result-copy"><strong>${esc(r.title)}</strong><span>${esc(r.desc||"No additional details")}</span></span><span>↗</span></button>`).join("")||empty("⌕","No matches","Try a different search term.") : empty("⌕","Search your workspace","Start typing to search your saved LifeOS data.")}</div>`}
-function settingsView(){return pageHead("YOUR DATA, YOUR CHOICE","Settings & data","Manage your workspace details and local data.")+`<div class="grid settings-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Workspace preferences</h2><p class="panel-subtitle">Make LifeOS feel like yours.</p></div></div><div class="setting-row"><div class="setting-copy"><strong>Workspace name</strong><span>Shown in your sidebar.</span></div><input class="field" id="profile-name-input" maxlength="50" value="${esc(data.profile.name||"My workspace")}" aria-label="Workspace name"></div><div class="setting-row"><div class="setting-copy"><strong>Keyboard search</strong><span>Use <span class="kbd">/</span> to focus search on compatible keyboards.</span></div><span class="tag accent">Enabled</span></div></section><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Data & recovery</h2><p class="panel-subtitle">Export a copy regularly to protect your work.</p></div></div><div class="warning-note">This version stores data in this browser's localStorage. It is not encrypted, synced, or automatically backed up. Clearing browser data may delete your workspace. Do not store passwords or highly sensitive secrets here.</div><div class="setting-row"><div class="setting-copy"><strong>Export workspace</strong><span>Download tasks, projects, notes, goals, habits, and preferences as JSON.</span></div>${btn("Export JSON","export-data","btn btn-primary")}</div><div class="setting-row"><div class="setting-copy"><strong>Import workspace</strong><span>Restore a JSON export. This replaces the current workspace.</span></div>${btn("Import JSON","import-data","btn")}</div><div class="setting-row"><div class="setting-copy"><strong>Reset workspace</strong><span>Delete all local LifeOS data from this browser.</span></div>${btn("Reset data","reset-data","btn btn-danger")}</div></section></div><section class="panel" style="margin-top:15px"><div class="panel-head"><div><h2 class="panel-title">Feature status</h2><p class="panel-subtitle">Honest status of this local MVP.</p></div></div><div class="grid content-cards"><div class="compact-item"><div class="compact-symbol">✓</div><div class="compact-copy"><strong>Implemented</strong><span>Tasks, projects, notes, goals, habits, deadline calendar, colorful interface, export/import.</span></div></div><div class="compact-item"><div class="compact-symbol">◷</div><div class="compact-copy"><strong>Not yet implemented</strong><span>Accounts, cloud database, cross-device sync, notifications, attachments, recurring tasks, scheduled time blocks.</span></div></div><div class="compact-item"><div class="compact-symbol">◇</div><div class="compact-copy"><strong>AI is disabled</strong><span>No personal content is sent to an AI provider in this version.</span></div></div></div></section>`;
+function settingsView(){return pageHead("YOUR DATA, YOUR CHOICE","Settings & data","Manage your workspace details and local data.")+`<div class="grid settings-grid"><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Workspace preferences</h2><p class="panel-subtitle">Make LifeOS feel like yours.</p></div></div><div class="setting-row"><div class="setting-copy"><strong>Workspace name</strong><span>Shown in your sidebar.</span></div><input class="field" id="profile-name-input" maxlength="50" value="${esc(data.profile.name||"My workspace")}" aria-label="Workspace name"></div><div class="setting-row"><div class="setting-copy"><strong>Keyboard search</strong><span>Use <span class="kbd">/</span> to focus search on compatible keyboards.</span></div><span class="tag accent">Enabled</span></div></section><section class="panel"><div class="panel-head"><div><h2 class="panel-title">Data & recovery</h2><p class="panel-subtitle">Export a copy regularly to protect your work.</p></div></div><div class="warning-note">LifeOS keeps a local backup and syncs the signed-in account workspace to Supabase. Export a JSON backup regularly. Do not store passwords or highly sensitive secrets in notes.</div><div class="setting-row"><div class="setting-copy"><strong>Export workspace</strong><span>Download tasks, projects, notes, goals, habits, and preferences as JSON.</span></div>${btn("Export JSON","export-data","btn btn-primary")}</div><div class="setting-row"><div class="setting-copy"><strong>Import workspace</strong><span>Restore a JSON export. This replaces the current workspace.</span></div>${btn("Import JSON","import-data","btn")}</div><div class="setting-row"><div class="setting-copy"><strong>Reset workspace</strong><span>Delete all local LifeOS data from this browser.</span></div>${btn("Reset data","reset-data","btn btn-danger")}</div></section></div><section class="panel" style="margin-top:15px"><div class="panel-head"><div><h2 class="panel-title">Feature status</h2><p class="panel-subtitle">Honest status of this local MVP.</p></div></div><div class="grid content-cards"><div class="compact-item"><div class="compact-symbol">✓</div><div class="compact-copy"><strong>Implemented</strong><span>Tasks, projects, notes, goals, habits, deadline calendar, colorful interface, export/import.</span></div></div><div class="compact-item"><div class="compact-symbol">◷</div><div class="compact-copy"><strong>Not yet implemented</strong><span>Notifications, attachments, recurring tasks, scheduled time blocks.</span></div></div><div class="compact-item"><div class="compact-symbol">◇</div><div class="compact-copy"><strong>AI is disabled</strong><span>No personal content is sent to an AI provider in this version.</span></div></div></div></section>`;
 }
 
 function toolsView() {
@@ -252,92 +313,57 @@ function saveEntity(type,obj){const list=data[type];const existing=obj.id?list.f
  if(existing)Object.assign(existing,obj);else{obj.id=uid();list.unshift(obj)}save();$("#modal-root").innerHTML="";render();notify(existing?"Changes saved":"Created successfully")}
 function deleteEntity(type,id,label){const item=data[type].find(x=>x.id===id);if(!item)return;if(!confirm(`Delete ${label} "${item.title||item.name}"? This cannot be undone.`))return;data[type]=data[type].filter(x=>x.id!==id);if(type==="projects")data.tasks.forEach(t=>{if(t.projectId===id)t.projectId=""});if(type==="habits")delete data.habitLogs[id];save();render();notify(`${label} deleted`)}
 function exportData(){const payload={...data,exportedAt:new Date().toISOString(),app:"LifeOS local MVP"};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`lifeos-backup-${todayISO()}.json`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);notify("Workspace export prepared")}
-function importData(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result));if(!parsed||typeof parsed!=="object"||!Array.isArray(parsed.tasks)||!Array.isArray(parsed.projects)||!Array.isArray(parsed.notes)||!Array.isArray(parsed.goals)||!Array.isArray(parsed.habits))throw new Error("This does not look like a LifeOS export.");if(!confirm("Import this backup and replace the current workspace? Export your current data first if you need it."))return;const clean=initialData();for(const k of ["profile","tasks","projects","notes","goals","habits","habitLogs","preferences"])if(parsed[k]!==undefined)clean[k]=parsed[k];data=clean;save();// LifeOS authentication UI.
-// Admin access is deliberately not exposed as a visible control. The hidden entry
-// is a long-press on the brand mark or Ctrl+Shift+. . Credentials are verified
-// by the server; no admin password or privilege is stored in this front-end.
+function importData(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result));if(!parsed||typeof parsed!=="object"||!Array.isArray(parsed.tasks)||!Array.isArray(parsed.projects)||!Array.isArray(parsed.notes)||!Array.isArray(parsed.goals)||!Array.isArray(parsed.habits))throw new Error("This does not look like a LifeOS export.");if(!confirm("Import this backup and replace the current workspace? Export your current data first if you need it."))return;const clean=initialData();for(const k of ["profile","tasks","projects","notes","goals","habits","habitLogs","preferences"])if(parsed[k]!==undefined)clean[k]=parsed[k];data=clean;save();// Supabase-backed authentication and workspace access.
 const authScreen=$("#auth-screen");
 const authForm=$("#auth-form");
-let authMode="signin", brandHoldTimer=null, adminBusy=false;
-function setAuthMode(mode){
-  authMode=mode;
-  const creating=mode==="signup";
-  $("#auth-title").textContent=creating?"Create your space.":"Welcome back.";
-  $("#auth-subtitle").textContent=creating?"A fresh start for everything on your mind.":"Sign in to pick up where your ideas left off.";
-  $("#auth-submit-label").textContent=creating?"Create account":"Sign in";
-  $("#auth-switch-copy").textContent=creating?"Already have an account?":"New to LifeOS?";
-  $("#auth-switch").textContent=creating?"Sign in":"Create an account";
-  $("#auth-password").autocomplete=creating?"new-password":"current-password";
-  $("#auth-error").textContent="";
-}
+let authMode="signin", adminTapCount=0, adminTapTimer=null;
+function setAuthMode(mode){authMode=mode;const creating=mode==="signup";$("#auth-title").textContent=creating?"Create your space.":"Welcome back.";$("#auth-subtitle").textContent=creating?"A fresh start for everything on your mind.":"Sign in to pick up where your ideas left off.";$("#auth-submit-label").textContent=creating?"Create account":"Sign in";$("#auth-switch-copy").textContent=creating?"Already have an account?":"New to LifeOS?";$("#auth-switch").textContent=creating?"Sign in":"Create an account";$("#auth-password").autocomplete=creating?"new-password":"current-password";$("#auth-error").textContent="";}
 $("#auth-switch")?.addEventListener("click",()=>setAuthMode(authMode==="signin"?"signup":"signin"));
-async function postAuth(path,payload){
-  const response=await fetch(path,{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},credentials:"same-origin",body:JSON.stringify(payload)});
-  let result={};try{result=await response.json()}catch{}
-  if(!response.ok||result.ok!==true)throw new Error(result.message||"Unable to authenticate. Check your credentials and try again.");
-  return result;
-}
 authForm?.addEventListener("submit",async event=>{
-  event.preventDefault();
-  const email=$("#auth-email").value.trim(),password=$("#auth-password").value;
-  if(!email||password.length<4){$("#auth-error").textContent="Enter a valid email and password.";return;}
-  const submit=authForm.querySelector('button[type="submit"]');
-  submit.disabled=true;$("#auth-error").textContent="";
-  try{
-    // This endpoint must be implemented by the application's backend.
-    const result=await postAuth(authMode==="signup"?"/api/auth/register":"/api/auth/login",{email,password});
-    if(result.user?.name){data.profile.name=String(result.user.name).slice(0,80);save();}
-    authScreen.hidden=true;render();notify(authMode==="signup"?"Account created. Welcome to LifeOS.":"Welcome back to LifeOS.");
-  }catch(error){
-    $("#auth-error").textContent=error.message.includes("Failed to fetch")||error instanceof TypeError
-      ?"Authentication server is not connected. Connect the /api/auth service to enable sign-in."
-      :error.message;
-  }finally{submit.disabled=false;}
+ event.preventDefault(); const email=$("#auth-email").value.trim(); const password=$("#auth-password").value;
+ if(!supabaseClient){$("#auth-error").textContent="Supabase could not initialize. Check the project URL, public key and internet connection.";return;}
+ if(!email||password.length<6){$("#auth-error").textContent="Enter a valid email and a password of at least 6 characters.";return;}
+ const submit=authForm.querySelector('button[type="submit"]'); submit.disabled=true; $("#auth-error").textContent="Connecting securely…";
+ try{
+  let result;
+  if(authMode==="signup") result=await supabaseClient.auth.signUp({email,password,options:{emailRedirectTo:window.location.origin}});
+  else result=await supabaseClient.auth.signInWithPassword({email,password});
+  if(result.error) throw result.error;
+  if(authMode==="signup" && !result.data.session){$("#auth-error").textContent="Account created. Check your email to confirm it, then sign in.";return;}
+  if(result.data.session) await handleAuthSession(result.data.session);
+ }catch(error){$("#auth-error").textContent=error.message||"Authentication failed. Please try again.";}
+ finally{submit.disabled=false;}
 });
-function openAdminGate(){
-  if(authScreen.hidden||adminBusy)return;
-  const backdrop=$("#auth-admin-backdrop");
-  backdrop.hidden=false;
-  $("#auth-admin-message").textContent="";
-  $("#auth-admin-form").reset();
-  setTimeout(()=>$("#auth-admin-email")?.focus(),40);
-}
-const brandMark=$("#auth-brand-mark");
-brandMark?.addEventListener("pointerdown",()=>{
-  clearTimeout(brandHoldTimer);
-  brandHoldTimer=setTimeout(openAdminGate,1200);
+$("#signout-button")?.addEventListener("click",async()=>{
+ if(!supabaseClient){showAuth();return;}
+ const {error}=await supabaseClient.auth.signOut(); if(error){notify("Could not sign out. Try again.");return;}
+ currentUser=null;cloudReady=false;showAuth("You have signed out.");
 });
-["pointerup","pointerleave","pointercancel","blur"].forEach(name=>brandMark?.addEventListener(name,()=>clearTimeout(brandHoldTimer)));
-brandMark?.addEventListener("contextmenu",e=>e.preventDefault());
-document.addEventListener("keydown",e=>{
-  if(authScreen.hidden)return;
-  if(e.ctrlKey&&e.shiftKey&&e.key==="."){e.preventDefault();openAdminGate();}
-  if(e.key==="Escape")$("#auth-admin-backdrop").hidden=true;
-});
+// Five quick taps reveal the admin sign-in form. Admin status is read from trusted app_metadata only.
+$("#auth-admin-trigger")?.addEventListener("click",()=>{adminTapCount++;clearTimeout(adminTapTimer);adminTapTimer=setTimeout(()=>adminTapCount=0,1800);if(adminTapCount>=5){adminTapCount=0;$("#auth-admin-backdrop").hidden=false;$("#auth-admin-email").focus();}});
 $("#auth-admin-close")?.addEventListener("click",()=>{$("#auth-admin-backdrop").hidden=true;$("#auth-admin-message").textContent="";});
 $("#auth-admin-backdrop")?.addEventListener("click",e=>{if(e.target.id==="auth-admin-backdrop")e.currentTarget.hidden=true;});
 $("#auth-admin-form")?.addEventListener("submit",async e=>{
-  e.preventDefault();
-  if(adminBusy)return;
-  const email=$("#auth-admin-email").value.trim(),password=$("#auth-admin-password").value;
-  const button=e.currentTarget.querySelector('button[type="submit"]');
-  adminBusy=true;button.disabled=true;$("#auth-admin-message").textContent="";
-  try{
-    // Authorization is exclusively server-side. The endpoint must verify the
-    // identity, enforce an admin role, rate-limit attempts, and set a secure session.
-    const result=await postAuth("/api/auth/admin",{email,password});
-    if(result.user?.role!=="admin")throw new Error("This account does not have administrator access.");
-    $("#auth-admin-backdrop").hidden=true;authScreen.hidden=true;
-    document.documentElement.dataset.role="admin";
-    render();notify("Administrator session verified.");
-    document.dispatchEvent(new CustomEvent("lifeos:admin-authenticated",{detail:{user:result.user}}));
-  }catch(error){
-    $("#auth-admin-message").textContent=error.message.includes("Failed to fetch")||error instanceof TypeError
-      ?"Admin authentication service is not connected. No administrator access was granted."
-      :error.message;
-  }finally{adminBusy=false;button.disabled=false;}
+ e.preventDefault(); const message=$("#auth-admin-message");
+ if(!supabaseClient){message.textContent="Supabase is not configured.";return;}
+ message.textContent="Verifying administrator permissions…";
+ try{
+  const {data:result,error}=await supabaseClient.auth.signInWithPassword({email:$("#auth-admin-email").value.trim(),password:$("#auth-admin-password").value});
+  if(error) throw error;
+  const role=result.user?.app_metadata?.role;
+  if(role!=="admin") {await supabaseClient.auth.signOut();message.textContent="This account is not authorized as an administrator.";return;}
+  $("#auth-admin-backdrop").hidden=true; await handleAuthSession(result.session); notify("Administrator account verified");
+ }catch(error){message.textContent=error.message||"Admin sign-in failed.";}
 });
-
+if(supabaseClient){
+ supabaseClient.auth.onAuthStateChange((event,session)=>{
+  if(event==="SIGNED_OUT"){currentUser=null;cloudReady=false;showAuth();}
+ });
+ supabaseClient.auth.getSession().then(({data,error})=>{
+  if(error){showAuth("Could not restore your session. Please sign in again.");return;}
+  handleAuthSession(data.session);
+ }).catch(error=>{console.error(error);showAuth("Could not connect to Supabase. Check your internet connection.");});
+}else showAuth("Supabase configuration is missing. Check the URL and publishable key in index.html.");
 applyTheme();render();notify("Workspace imported")}catch(e){alert(`Import failed: ${e.message||"Invalid backup file"}`)}};reader.readAsText(file)}
 function handleAction(action,el){const id=el.dataset.id;
  switch(action){
