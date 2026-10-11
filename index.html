@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f7ff">
+  <meta name="description" content="LifeOS — a calmer personal workspace for tasks, projects, notes, goals and habits.">
+  <title>LifeOS — Personal Workspace</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="lifeos-intro" aria-hidden="true">
+  <div class="intro-curtain intro-curtain-left"></div>
+  <div class="intro-curtain intro-curtain-right"></div>
+  <div class="intro-content">
+    <div class="intro-logo">L</div>
+    <div class="intro-title">LifeOS<span class="accent">.</span></div>
+    <div class="intro-caption">Make room for what matters</div>
+    <div class="intro-progress"></div>
+  </div>
+</div>
+<section id="auth-screen" class="auth-screen" aria-label="Sign in to LifeOS">
+  <div class="auth-glow auth-glow-one"></div><div class="auth-glow auth-glow-two"></div>
+  <div class="auth-card">
+    <div class="auth-brand-row"><button type="button" class="auth-brand-mark" id="auth-brand-mark" aria-label="LifeOS">L</button><span class="auth-brand-name">LifeOS<span>.</span></span><span class="auth-chip">PERSONAL WORKSPACE</span></div>
+    <div class="auth-visual" aria-hidden="true"><div class="auth-orbit orbit-one"></div><div class="auth-orbit orbit-two"></div><div class="auth-visual-core">✦</div><span class="auth-float float-a">✓ Focus</span><span class="auth-float float-b">✧ Create</span><span class="auth-float float-c">↗ Grow</span></div>
+    <div class="auth-copy"><p class="eyebrow">YOUR SPACE, YOUR PACE</p><h1 id="auth-title">Welcome back.</h1><p id="auth-subtitle">Sign in to pick up where your ideas left off.</p></div>
+    <form id="auth-form" class="auth-form">
+      <label class="auth-field"><span>Email address</span><input id="auth-email" type="email" placeholder="you@example.com" autocomplete="username" required></label>
+      <label class="auth-field"><span>Password</span><input id="auth-password" type="password" placeholder="Enter your password" autocomplete="current-password" minlength="4" required></label>
+      <div class="auth-error" id="auth-error" role="status" aria-live="polite"></div>
+      <button class="auth-submit" type="submit"><span id="auth-submit-label">Sign in</span><span aria-hidden="true">↗</span></button>
+    </form>
+    <div class="auth-switch"><span id="auth-switch-copy">New to LifeOS?</span> <button type="button" id="auth-switch">Create an account</button></div>
+    <div class="auth-foot"><span class="auth-foot-dot"></span> Private workspace experience </div>
+    <p class="auth-demo-note">Your workspace, thoughtfully organized.</p>
+  </div>
+  <div class="auth-admin-backdrop" id="auth-admin-backdrop" hidden><section class="auth-admin-card" role="dialog" aria-modal="true" aria-labelledby="auth-admin-title"><button type="button" class="auth-admin-close" id="auth-admin-close" aria-label="Close">×</button><div class="auth-admin-icon">⌘</div><p class="eyebrow">RESTRICTED AREA</p><h2 id="auth-admin-title">Administrator access</h2><p>Use your administrator credentials to continue.</p><form id="auth-admin-form"><label class="auth-field"><span>Admin email</span><input type="email" id="auth-admin-email" autocomplete="username" required placeholder="admin@example.com"></label><label class="auth-field"><span>Admin password</span><input type="password" id="auth-admin-password" autocomplete="current-password" required placeholder="Admin password"></label><div id="auth-admin-message" class="auth-error" role="status"></div><button class="auth-submit" type="submit">Continue securely <span>↗</span></button></form></section></div>
+</section>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a class="brand" href="#" data-action="go-dashboard"><span class="brand-mark">L</span><span>LifeOS</span><span class="brand-pill">PERSONAL</span></a>
+    <div class="workspace-label">WORKSPACE</div>
+    <nav class="side-nav" aria-label="Main navigation">
+      <button class="nav-item active" data-view="dashboard"><span class="nav-icon">◫</span><span>Overview</span></button>
+      <button class="nav-item" data-view="tasks"><span class="nav-icon">✓</span><span>Tasks</span><span class="nav-count" id="nav-task-count">0</span></button>
+      <button class="nav-item" data-view="projects"><span class="nav-icon">▦</span><span>Projects</span></button>
+      <button class="nav-item" data-view="notes"><span class="nav-icon">▤</span><span>Second brain</span></button>
+      <button class="nav-item" data-view="goals"><span class="nav-icon">◎</span><span>Goals & habits</span></button>
+      <button class="nav-item" data-view="calendar"><span class="nav-icon">▦</span><span>Planning</span></button>
+      <button class="nav-item" data-view="search"><span class="nav-icon">⌕</span><span>Universal search</span></button>
+      <button class="nav-item" data-view="tools">
+      <span class="nav-icon">⚒</span>
+      <span>Tools</span>
+      </button>
+    </nav>
+    <div class="sidebar-spacer"></div>
+    <button class="nav-item settings-nav" data-view="settings"><span class="nav-icon">⚙</span><span>Settings & data</span></button>
+    <div class="sidebar-profile"><div class="profile-avatar" id="profile-avatar">S</div><div class="profile-copy"><strong id="profile-name">My workspace</strong><span>Local workspace</span></div><button class="icon-button" data-view="settings" aria-label="Open settings">···</button></div>
+  </aside>
+
+  <main class="main-content">
+    <header class="topbar">
+      <div class="breadcrumbs"><span>LifeOS</span><span class="crumb-sep">/</span><strong id="breadcrumb-current">Overview</strong></div>
+      <div class="topbar-actions"><label class="top-search"><span>⌕</span><input id="global-search" placeholder="Search everything…" autocomplete="off" aria-label="Search everything"><kbd>⌕</kbd></label><span class="top-date" id="today-date"></span><button class="avatar-small" data-view="settings" id="top-avatar" aria-label="Settings">S</button></div>
+    </header>
+
+    <section class="page" id="view-root" aria-live="polite"></section>
+  </main>
+</div>
+<nav class="mobile-nav" aria-label="Mobile navigation">
+  <button class="active" data-view="dashboard"><span>◫</span><small>Home</small></button>
+  <button data-view="tasks"><span>✓</span><small>Tasks</small></button>
+  <button data-view="projects"><span>▦</span><small>Projects</small></button>
+  <button data-view="notes"><span>▤</span><small>Notes</small></button>
+  <button data-view="goals"><span>◎</span><small>Goals</small></button>
+  <button data-view="tools">
+  <span>⚒</span>
+  <small>Tools</small>
+  </button>
+</nav>
+<div id="modal-root"></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<input type="file" id="import-file" accept="application/json,.json" hidden>
+
+<!-- Local browser tools. These libraries load from a CDN. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
